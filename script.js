@@ -1,5 +1,7 @@
 let currentTrackIndex = 0;
 let musicFiles = [];
+let audioCache = new Map(); // Cache for audio elements
+let preloadedTracks = new Set(); // Track which files are preloaded
 
 async function loadMusic() {
   const musicDiv = document.querySelector(".music .custom-player");
@@ -15,14 +17,18 @@ async function loadMusic() {
     musicFiles = await response.json();
 
     if (musicFiles.length > 0) {
-      // Create hidden audio element
+      // Create main audio element
       const audio = document.createElement("audio");
       audio.id = "audio-element";
+      audio.preload = "metadata"; // Preload metadata for better UX
       document.body.appendChild(audio);
 
       // Load first track
-      loadTrack(0);
+      await loadTrack(0);
       initializePlayer();
+
+      // Start preloading adjacent tracks
+      preloadAdjacentTracks(0);
     } else {
       document.getElementById("track-title").textContent =
         "No music files available";
@@ -33,14 +39,83 @@ async function loadMusic() {
   }
 }
 
-function loadTrack(index) {
+// Preload tracks adjacent to current track
+function preloadAdjacentTracks(currentIndex) {
+  const tracksToPreload = [
+    (currentIndex - 1 + musicFiles.length) % musicFiles.length, // Previous
+    (currentIndex + 1) % musicFiles.length, // Next
+  ];
+
+  tracksToPreload.forEach(index => {
+    const filename = musicFiles[index];
+    if (filename && !preloadedTracks.has(filename)) {
+      preloadTrack(filename);
+    }
+  });
+}
+
+// Preload a single track
+function preloadTrack(filename) {
+  if (preloadedTracks.has(filename)) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const audio = new Audio();
+    audio.preload = "auto";
+    audio.src = `music/${filename}`;
+    
+    const onLoad = () => {
+      audioCache.set(filename, audio);
+      preloadedTracks.add(filename);
+      console.log(`Preloaded: ${filename}`);
+      cleanup();
+      resolve();
+    };
+
+    const onError = () => {
+      console.warn(`Failed to preload: ${filename}`);
+      cleanup();
+      resolve(); // Don't reject, just continue
+    };
+
+    const cleanup = () => {
+      audio.removeEventListener('canplaythrough', onLoad);
+      audio.removeEventListener('error', onError);
+    };
+
+    audio.addEventListener('canplaythrough', onLoad, { once: true });
+    audio.addEventListener('error', onError, { once: true });
+  });
+}
+
+async function loadTrack(index) {
   const audio = document.getElementById("audio-element");
   const trackTitle = document.getElementById("track-title");
 
   if (musicFiles[index]) {
-    audio.src = `music/${musicFiles[index]}`;
-    trackTitle.textContent = musicFiles[index].replace(/\.[^/.]+$/, ""); // Remove extension
+    const filename = musicFiles[index];
+    const trackUrl = `music/${filename}`;
+    
+    // Check if we have a cached version
+    if (audioCache.has(filename)) {
+      const cachedAudio = audioCache.get(filename);
+      audio.src = cachedAudio.src;
+      console.log(`Using cached audio for: ${filename}`);
+    } else {
+      // Load normally but with caching headers
+      audio.src = trackUrl;
+      // Add to preloaded tracks once it loads
+      audio.addEventListener('canplaythrough', () => {
+        preloadedTracks.add(filename);
+      }, { once: true });
+    }
+
+    trackTitle.textContent = filename.replace(/\.[^/.]+$/, ""); // Remove extension
     currentTrackIndex = index;
+
+    // Preload adjacent tracks
+    preloadAdjacentTracks(index);
   }
 }
 
@@ -67,17 +142,17 @@ function initializePlayer() {
   });
 
   // Previous/Next track
-  prevBtn.addEventListener("click", () => {
+  prevBtn.addEventListener("click", async () => {
     currentTrackIndex =
       (currentTrackIndex - 1 + musicFiles.length) % musicFiles.length;
-    loadTrack(currentTrackIndex);
+    await loadTrack(currentTrackIndex);
     audio.play();
     playBtn.textContent = "⏸";
   });
 
-  nextBtn.addEventListener("click", () => {
+  nextBtn.addEventListener("click", async () => {
     currentTrackIndex = (currentTrackIndex + 1) % musicFiles.length;
-    loadTrack(currentTrackIndex);
+    await loadTrack(currentTrackIndex);
     audio.play();
     playBtn.textContent = "⏸";
   });
@@ -114,9 +189,9 @@ function initializePlayer() {
   audio.volume = 0.5;
 
   // Auto-play next track when current ends
-  audio.addEventListener("ended", () => {
+  audio.addEventListener("ended", async () => {
     currentTrackIndex = (currentTrackIndex + 1) % musicFiles.length;
-    loadTrack(currentTrackIndex);
+    await loadTrack(currentTrackIndex);
     audio.play();
   });
 
@@ -124,6 +199,17 @@ function initializePlayer() {
   audio.onseeking = (event) => {
     console.log("Audio is seeking a new position.");
   };
+
+  // Clean up old cached audio elements periodically
+  setInterval(() => {
+    if (audioCache.size > 10) { // Keep only 10 cached tracks
+      const keys = Array.from(audioCache.keys());
+      const oldestKey = keys[0];
+      audioCache.delete(oldestKey);
+      preloadedTracks.delete(oldestKey);
+      console.log(`Cleaned up cached audio: ${oldestKey}`);
+    }
+  }, 30000); // Check every 30 seconds
 }
 
 function formatTime(seconds) {

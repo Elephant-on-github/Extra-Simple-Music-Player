@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { existsSync, statSync, readFileSync } from "node:fs";
 import { extname } from "node:path";
+import { createHash } from "node:crypto";
 
 function getContentType(filePath) {
   const ext = extname(filePath).toLowerCase();
@@ -22,6 +23,11 @@ function getContentType(filePath) {
   }
 }
 
+// Generate ETag for files to improve caching
+function generateETag(stats) {
+  return `"${stats.size}-${stats.mtime.getTime()}"`;
+}
+
 const server = Bun.serve({
   port: 3000,
   async fetch(req) {
@@ -33,10 +39,15 @@ const server = Bun.serve({
       // Filter to only include mp3 files
       files = files.filter((file) => file.toLowerCase().endsWith(".mp3"));
       console.log("Serving music files:", files);
-      return new Response(JSON.stringify(files));
+      return new Response(JSON.stringify(files), {
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "public, max-age=300", // Cache API response for 5 minutes
+        },
+      });
     }
 
-    // Serve music files with range request support
+    // Serve music files with enhanced caching and range request support
     if (url.pathname.startsWith("/music/")) {
       const filePath = decodeURIComponent(url.pathname.slice(1));
 
@@ -45,13 +56,24 @@ const server = Bun.serve({
       }
 
       const stats = statSync(filePath);
+      const etag = generateETag(stats);
       const range = req.headers.get("range");
-
-      // Check if it's an audio file that needs range support
+      const ifNoneMatch = req.headers.get("if-none-match");
       const isAudioFile = /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(filePath);
 
+      // Check if client has cached version
+      if (ifNoneMatch === etag) {
+        return new Response(null, { 
+          status: 304,
+          headers: {
+            "ETag": etag,
+            "Cache-Control": "public, max-age=31536000, immutable",
+          }
+        });
+      }
+
       if (range && isAudioFile) {
-        // Handle range request for seeking
+        // Range requests for audio files
         const parts = range.replace(/bytes=/, "").split("-");
         const start = parseInt(parts[0], 10);
         const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
@@ -76,47 +98,84 @@ const server = Bun.serve({
             "Accept-Ranges": "bytes",
             "Content-Length": chunksize.toString(),
             "Content-Type": getContentType(filePath),
-            "Cache-Control": "no-cache",
+            "ETag": etag,
+            "Cache-Control": "public, max-age=31536000, immutable",
           },
         });
       } else if (isAudioFile) {
-        // Regular audio file request - still need Accept-Ranges header
+        // Regular audio file request with strong caching
         const file = Bun.file(filePath);
         return new Response(file, {
           headers: {
             "Accept-Ranges": "bytes",
             "Content-Type": getContentType(filePath),
             "Content-Length": stats.size.toString(),
+            "ETag": etag,
+            "Cache-Control": "public, max-age=31536000, immutable", // Cache for 1 year
+            "Expires": new Date(Date.now() + 31536000000).toUTCString(), // 1 year from now
           },
         });
       } else {
-        // Non-audio file - serve normally
+        // Non-audio files
         const file = Bun.file(filePath);
-        return new Response(file);
+        return new Response(file, {
+          headers: {
+            "ETag": etag,
+            "Cache-Control": "public, max-age=3600",
+          },
+        });
       }
     }
 
     // Handle favicon.ico request
     if (url.pathname === "/favicon.ico") {
-      // You can either serve a favicon file if you have one:
       if (existsSync("favicon.ico")) {
-        return new Response(Bun.file("favicon.ico"));
+        const stats = statSync("favicon.ico");
+        const etag = generateETag(stats);
+        const ifNoneMatch = req.headers.get("if-none-match");
+
+        if (ifNoneMatch === etag) {
+          return new Response(null, { status: 304 });
+        }
+
+        return new Response(Bun.file("favicon.ico"), {
+          headers: { 
+            "Cache-Control": "public, max-age=86400",
+            "ETag": etag,
+          },
+        });
       }
-      // Or return an empty response
       return new Response(null, { status: 204 });
     }
 
-    // Serve index.html
+    // Serve index.html with caching enabled
     if (url.pathname === "/") {
       const html = Bun.file("index.html");
-      return new Response(html);
+      return new Response(html, {
+        headers: {
+          "Cache-Control": "public, max-age=3600", // cache for 1 hour
+        },
+      });
     }
 
-    // Serve other static files
+    // Serve other static files with caching enabled
     const filePath = url.pathname.slice(1);
     if (existsSync(filePath)) {
+      const stats = statSync(filePath);
+      const etag = generateETag(stats);
+      const ifNoneMatch = req.headers.get("if-none-match");
+
+      if (ifNoneMatch === etag) {
+        return new Response(null, { status: 304 });
+      }
+
       const file = Bun.file(filePath);
-      return new Response(file);
+      return new Response(file, {
+        headers: {
+          "Cache-Control": "public, max-age=3600",
+          "ETag": etag,
+        },
+      });
     }
     return new Response("Not found", { status: 404 });
   },
