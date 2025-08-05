@@ -6,7 +6,12 @@ async function loadMusic() {
 
   try {
     // Fetch music files list from your API endpoint
-    const response = await fetch("/api/music");
+    const response = await fetch("/api/music", {
+      cache: "force-cache",
+      headers: {
+        "Content-Type": "application/music",
+      },
+    });
     musicFiles = await response.json();
 
     if (musicFiles.length > 0) {
@@ -120,7 +125,6 @@ function initializePlayer() {
     console.log("Audio is seeking a new position.");
   };
 }
-
 
 function formatTime(seconds) {
   const mins = Math.floor(seconds / 60);
