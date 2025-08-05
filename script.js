@@ -67,12 +67,14 @@ function initializePlayer() {
       (currentTrackIndex - 1 + musicFiles.length) % musicFiles.length;
     loadTrack(currentTrackIndex);
     audio.play();
+    playBtn.textContent = "⏸";
   });
 
   nextBtn.addEventListener("click", () => {
     currentTrackIndex = (currentTrackIndex + 1) % musicFiles.length;
     loadTrack(currentTrackIndex);
     audio.play();
+    playBtn.textContent = "⏸";
   });
 
   // Progress bar
