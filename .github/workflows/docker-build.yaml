@@ -28,4 +28,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/elephantdev/simplemusic:${{ github.sha }}
+          tags: ghcr.io/elephantdev/simplemusic:$(date +%s)
