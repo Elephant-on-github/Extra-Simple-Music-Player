@@ -28,4 +28,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/elephantdev/simplemusic:${{ github.run_number }}
+          tags: ghcr.io/elephant-on-github/simplemusic:${{ github.run_number }}
