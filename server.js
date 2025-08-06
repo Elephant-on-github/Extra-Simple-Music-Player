@@ -28,6 +28,13 @@ function generateETag(stats) {
   return `"${stats.size}-${stats.mtime.getTime()}"`;
 }
 
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
 const server = Bun.serve({
   port: 3000,
   async fetch(req) {
@@ -39,6 +46,7 @@ const server = Bun.serve({
       // Filter to only include mp3 files
       files = files.filter((file) => file.toLowerCase().endsWith(".mp3"));
       console.log("Serving music files:", files);
+      shuffle(files); // Shuffle the files for variety
       return new Response(JSON.stringify(files), {
         headers: {
           "Content-Type": "application/json",
@@ -63,12 +71,12 @@ const server = Bun.serve({
 
       // Check if client has cached version
       if (ifNoneMatch === etag) {
-        return new Response(null, { 
+        return new Response(null, {
           status: 304,
           headers: {
-            "ETag": etag,
+            ETag: etag,
             "Cache-Control": "public, max-age=31536000, immutable",
-          }
+          },
         });
       }
 
@@ -98,7 +106,7 @@ const server = Bun.serve({
             "Accept-Ranges": "bytes",
             "Content-Length": chunksize.toString(),
             "Content-Type": getContentType(filePath),
-            "ETag": etag,
+            ETag: etag,
             "Cache-Control": "public, max-age=31536000, immutable",
           },
         });
@@ -110,9 +118,9 @@ const server = Bun.serve({
             "Accept-Ranges": "bytes",
             "Content-Type": getContentType(filePath),
             "Content-Length": stats.size.toString(),
-            "ETag": etag,
+            ETag: etag,
             "Cache-Control": "public, max-age=31536000, immutable", // Cache for 1 year
-            "Expires": new Date(Date.now() + 31536000000).toUTCString(), // 1 year from now
+            Expires: new Date(Date.now() + 31536000000).toUTCString(), // 1 year from now
           },
         });
       } else {
@@ -120,7 +128,7 @@ const server = Bun.serve({
         const file = Bun.file(filePath);
         return new Response(file, {
           headers: {
-            "ETag": etag,
+            ETag: etag,
             "Cache-Control": "public, max-age=3600",
           },
         });
@@ -139,9 +147,9 @@ const server = Bun.serve({
         }
 
         return new Response(Bun.file("favicon.ico"), {
-          headers: { 
+          headers: {
             "Cache-Control": "public, max-age=86400",
-            "ETag": etag,
+            ETag: etag,
           },
         });
       }
@@ -173,7 +181,7 @@ const server = Bun.serve({
       return new Response(file, {
         headers: {
           "Cache-Control": "public, max-age=3600",
-          "ETag": etag,
+          ETag: etag,
         },
       });
     }
