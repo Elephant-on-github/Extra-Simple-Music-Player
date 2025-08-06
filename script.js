@@ -9,7 +9,7 @@ async function loadMusic() {
   try {
     // Fetch music files list from your API endpoint
     const response = await fetch("/api/music", {
-      cache: "force-cache",
+      cache: "no-cache", // Disable cache for fresh data
       headers: {
         "Content-Type": "application/music",
       },

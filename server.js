@@ -46,9 +46,7 @@ const server = Bun.serve({
       let files = await readdir("music/", { recursive: true });
       // Filter to only include mp3 files
       files = files.filter((file) => file.toLowerCase().endsWith(".mp3"));
-      console.log("Serving msic files:", files);
       files = shuffle(files); // Shuffle the files for variety
-      console.log("Shuffled music files:", files);
       return new Response(JSON.stringify(files), {
         headers: {
           "Content-Type": "application/json",
