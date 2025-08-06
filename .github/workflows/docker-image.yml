@@ -17,4 +17,4 @@ jobs:
     - name: Build the Docker image
       run: docker build . --file Dockerfile --tag elephantdev/simplemusic:$(date +%s)
     - name: Push the Docker image
-      run: docker push elephantdev/simplemusic:$(date +%s)
+      run: docker push elephantdev/simplemusic
