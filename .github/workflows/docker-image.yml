@@ -15,6 +15,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag elephantdev/simplemusic:$(date +%s)
+      run: |
+        TAG=elephantdev/simplemusic:$(date +%s)
+        docker build . --file Dockerfile --tag $TAG
+        echo "TAG=$TAG" >> $GITHUB_ENV
+
     - name: Push the Docker image
-      run: docker push elephantdev/simplemusic
+      run: docker push $TAG
+      env:
+        TAG: ${{ env.TAG }}      
