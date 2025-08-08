@@ -1,7 +1,118 @@
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { existsSync, statSync, readFileSync } from "node:fs";
 import { extname } from "node:path";
 import { createHash } from "node:crypto";
+
+// Simple ID3v2 tag parser
+class ID3Parser {
+  static parseBuffer(buffer) {
+    const metadata = {
+      title: null,
+      artist: null,
+      album: null,
+      year: null,
+      genre: null
+    };
+
+    try {
+      // Check for ID3v2 header
+      if (buffer.length < 10 || buffer.toString('ascii', 0, 3) !== 'ID3') {
+        return metadata;
+      }
+
+      const version = buffer[3];
+      const flags = buffer[5];
+      
+      // Calculate tag size (synchsafe integer)
+      const tagSize = (buffer[6] << 21) | (buffer[7] << 14) | (buffer[8] << 7) | buffer[9];
+      
+      let offset = 10;
+      const tagEnd = Math.min(offset + tagSize, buffer.length);
+
+      while (offset < tagEnd - 10) {
+        // Read frame header
+        const frameId = buffer.toString('ascii', offset, offset + 4);
+        if (frameId === '\0\0\0\0') break;
+
+        let frameSize;
+        if (version === 4) {
+          // ID3v2.4 uses synchsafe integers
+          frameSize = (buffer[offset + 4] << 21) | (buffer[offset + 5] << 14) | 
+                     (buffer[offset + 6] << 7) | buffer[offset + 7];
+        } else {
+          // ID3v2.3 uses regular integers
+          frameSize = (buffer[offset + 4] << 24) | (buffer[offset + 5] << 16) | 
+                     (buffer[offset + 6] << 8) | buffer[offset + 7];
+        }
+
+        const frameFlags = (buffer[offset + 8] << 8) | buffer[offset + 9];
+        offset += 10;
+
+        if (frameSize > tagEnd - offset) break;
+
+        // Extract frame content
+        let frameContent = buffer.slice(offset, offset + frameSize);
+        
+        // Handle text encoding (skip first byte which is encoding type)
+        if (frameContent.length > 1) {
+          const encoding = frameContent[0];
+          let text = '';
+          
+          if (encoding === 0 || encoding === 3) {
+            // ISO-8859-1 or UTF-8
+            text = frameContent.slice(1).toString('utf8').replace(/\0/g, '');
+          } else if (encoding === 1 || encoding === 2) {
+            // UTF-16 with BOM or UTF-16 BE
+            text = frameContent.slice(1).toString('utf16le').replace(/\0/g, '');
+          }
+
+          // Map frame IDs to metadata
+          switch (frameId) {
+            case 'TIT2': // Title
+              metadata.title = text;
+              break;
+            case 'TPE1': // Artist
+              metadata.artist = text;
+              break;
+            case 'TALB': // Album
+              metadata.album = text;
+              break;
+            case 'TYER': // Year (ID3v2.3)
+            case 'TDRC': // Recording time (ID3v2.4)
+              metadata.year = text;
+              break;
+            case 'TCON': // Genre
+              metadata.genre = text;
+              break;
+          }
+        }
+
+        offset += frameSize;
+      }
+    } catch (error) {
+      console.warn('Error parsing ID3 tags:', error);
+    }
+
+    return metadata;
+  }
+
+  static async parseFile(filePath) {
+    try {
+      // Read first 64KB which should contain ID3v2 tags
+      const buffer = await readFile(filePath, { start: 0, end: 65536 });
+      return this.parseBuffer(buffer);
+    } catch (error) {
+      console.warn(`Error reading file ${filePath}:`, error);
+      return {
+        title: null,
+        artist: null,
+        album: null,
+        year: null,
+        genre: null
+      };
+    }
+  }
+}
 
 function getContentType(filePath) {
   const ext = extname(filePath).toLowerCase();
@@ -36,6 +147,43 @@ function shuffle(array) {
   return array;
 }
 
+// Parse filename for metadata fallback
+function parseFilenameMetadata(filename) {
+  const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+  
+  // Try to parse "Artist - Title" format
+  const dashSplit = nameWithoutExt.split(' - ');
+  if (dashSplit.length >= 2) {
+    return {
+      title: dashSplit.slice(1).join(' - ').trim(),
+      artist: dashSplit[0].trim(),
+      album: 'Unknown Album'
+    };
+  }
+  
+  // Try to parse "Artist_Title" format
+  const underscoreSplit = nameWithoutExt.split('_');
+  if (underscoreSplit.length >= 2) {
+    return {
+      title: underscoreSplit.slice(1).join('_').replace(/_/g, ' ').trim(),
+      artist: underscoreSplit[0].replace(/_/g, ' ').trim(),
+      album: 'Unknown Album'
+    };
+  }
+  
+  // Try to parse numbers and clean up
+  const cleanTitle = nameWithoutExt
+    .replace(/^\d+[\s\-\.]*/, '') // Remove leading track numbers
+    .replace(/[\(\[].*?[\)\]]/g, '') // Remove content in brackets/parentheses
+    .trim();
+  
+  return {
+    title: cleanTitle || nameWithoutExt,
+    artist: 'Unknown Artist',
+    album: 'Unknown Album'
+  };
+}
+
 const server = Bun.serve({
   port: 3000,
   async fetch(req) {
@@ -53,6 +201,55 @@ const server = Bun.serve({
           "Cache-Control": "public, max-age=300", // Cache API response for 5 minutes
         },
       });
+    }
+
+    // Handle metadata extraction endpoint
+    if (url.pathname.startsWith("/api/metadata/")) {
+      const filename = decodeURIComponent(url.pathname.slice(14)); // Remove "/api/metadata/"
+      const filePath = `music/${filename}`;
+
+      if (!existsSync(filePath)) {
+        return new Response("File not found", { status: 404 });
+      }
+
+      try {
+        // Extract ID3 metadata
+        const id3Metadata = await ID3Parser.parseFile(filePath);
+        
+        // Use filename parsing as fallback
+        const filenameMetadata = parseFilenameMetadata(filename);
+        
+        // Combine metadata, prioritizing ID3 tags over filename parsing
+        const metadata = {
+          title: id3Metadata.title || filenameMetadata.title,
+          artist: id3Metadata.artist || filenameMetadata.artist,
+          album: id3Metadata.album || filenameMetadata.album,
+          year: id3Metadata.year,
+          genre: id3Metadata.genre,
+          filename: filename
+        };
+
+        return new Response(JSON.stringify(metadata), {
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=3600", // Cache metadata for 1 hour
+          },
+        });
+      } catch (error) {
+        console.error(`Error extracting metadata for ${filename}:`, error);
+        
+        // Return filename-based metadata as fallback
+        const fallbackMetadata = parseFilenameMetadata(filename);
+        return new Response(JSON.stringify({
+          ...fallbackMetadata,
+          filename: filename
+        }), {
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=3600",
+          },
+        });
+      }
     }
 
     // Serve music files with enhanced caching and range request support
