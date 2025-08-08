@@ -358,7 +358,8 @@ const server = Bun.serve({
       const html = Bun.file("index.html");
       return new Response(html, {
         headers: {
-          "Cache-Control": "public, max-age=3600", // cache for 1 hour
+          "Cache-Control": "public, max-age=3600",
+          "Accept-Encoding": "gzip, deflate, br"
         },
       });
     }
