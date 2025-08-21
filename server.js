@@ -6,18 +6,22 @@ import { createClient } from "pexels";
 import { configDotenv } from "dotenv";
 
 configDotenv({ path: ".env" });
-
-const client = createClient(process.env.PEXELS_API_KEY);
-//request splashes from Pexels API
-client.photos
-  .search({ query: "Mountains", per_page: 10 })
-  .then((photos) => {
+if (process.env.PEXELS_API_KEY) {
+  const client = createClient(process.env.PEXELS_API_KEY);
+  //request splashes from Pexels API
+  client.photos
+    .search({ query: "Mountains", per_page: 10 })
+    .then((photos) => {
     // console.log("Pexels Photos:", photos);
     console.log("Photos loaded successfully");
   })
   .catch((error) => {
     console.error("Error fetching Pexels photos:", error);
   });
+}
+else {
+  console.error("PEXELS_API_KEY is not defined");
+}
 
 // Simple ID3v2 tag parser
 class ID3Parser {
