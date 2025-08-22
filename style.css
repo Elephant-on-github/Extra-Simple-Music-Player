@@ -264,7 +264,7 @@ body {
   transform: scaleX(1); /* Scale to full width on hover */
 }
 
-small-svg {
+.small-svg {
   fill: #fff;
   width: 24px;
   height: 24px;
