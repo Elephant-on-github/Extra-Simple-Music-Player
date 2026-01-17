@@ -22,4 +22,5 @@ You will also need to add a `.env` with your Pexels Api Key.
 
 ```env
 PEXELS_API_KEY = Your_API_Key_Here
+PEXELS_SEARCH = Rolling hills # Your preferred search term for background images
 ```
